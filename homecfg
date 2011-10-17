@@ -1,0 +1,201 @@
+#!/bin/sh
+set -e
+set -o nounset
+. `dirname $0`/libscript.sh
+
+CFG="$HOME/.homecfg"
+VER="0.2"
+[[ -f "$CFG" ]] && source "$CFG" 
+
+
+USERDIR=${userdir:-.`whoami`}
+SCPFLAGS=${scpoptions:-""}
+SCPREMOTE=${scpremote:-""}
+USER=`whoami`
+
+#Configuration archive
+CFGARCHIVE=${archive:-"$USER-config.tgz"}
+EXCLUDE=${exclude:-""}
+
+PATH=${PATH}:~"/$USERDIR/sbin":`dirname $0`
+
+#Display header with program name and set default color for output
+progname()
+{
+   echo $bold"homecfg v$VER - Backup and restore personal configuration files"$nobold
+   echo $green
+}
+
+#Display program options and help
+help()
+{
+   echo "Usage: homecfg -r|-s [-nhmd] [-f ${ul}file${noul}]"
+   echo "   $green-s$nocolor Store configuration on the network (and in ~/$USERDIR/etc/$CFGARCHIVE also)."
+   echo "   $green-r$nocolor Restore configuration from the network."
+   echo "   $green-n$nocolor Do not copy configuration to/from the network, leave it only in local file."
+   echo "   $green-f ${ul}file${noul}${nocolor} Restore config from specified file."
+   echo "   $green-m$nocolor Add month/year suffix to configuration archive."
+   echo "      Useful to make monthly snapshot."
+   echo "   $green-d$nocolor Add year/month/day suffix to configuration archive."
+   echo "      Useful to make day snapshot."
+   echo "   $green-h$nocolor this help."
+   echo
+   echo "Example:"
+   echo "   Store configuration archive in ~/$USERDIR/etc, but also on the network:"
+   echo "   $ homecfg -s"
+   echo "   Store configuration archive in ~/$USERDIR/etc (not on network):"
+   echo "   $ homecfg -n"
+   echo "   Restore configuration from network storage and make appropriate symbolic links:"
+   echo "   $ homecfg -r"
+}
+
+#Tar, compress and save my personal config
+#optionally copy it to the network using scp
+save()
+{
+   echo "Taring and compresing personal config..."
+   #set xopt to the --exclude-from=$EXCLUDE if the configuration
+   #variable (and file) exist
+   xopt=""
+   if [[ -n "$EXCLUDE" ]]; then
+      [[ -f "$HOME/$EXCLUDE" ]] || { echo $red"ERROR: Exclude file $EXCLUDE does not exist." && exit 2; }
+      xopt="--exclude-from=$EXCLUDE";
+   fi
+
+   #Tar the configuration and copy it to the network with scp 
+   #unless the user passed the -n option
+   pushd "$HOME" > /dev/null
+   tar --exclude-backups --exclude-vcs --exclude="*~" --exclude="*${CFGARCHIVE::-4}*" "$xopt" -zcvf "/tmp/$CFGARCHIVE" "$USERDIR" | sed -e "s/^/  >>> /g" 
+   echo $nocolor
+   mv -v --backup=simple --suffix=.bak "/tmp/$CFGARCHIVE" "$HOME/$USERDIR/etc/"
+   popd > /dev/null
+
+   if type -t scp > /dev/null && [[ "$COPY2NET" == "yes" ]]; then
+      if [ netup ]; then
+         echo $green"Copying $CFGARCHIVE to network..."
+         echo $green"* If you see an error like:"
+         echo $green"    \"stdin: not a tty\", just ignore it. It's not really a problem."
+         echo $green"* We move files to the network with scp, so you may be asked for"
+         echo $green"  a passphrase."
+         echo $nocolor
+         set +e
+         scp $SCPFLAGS "$HOME/$USERDIR/etc/$CFGARCHIVE" ${SCPREMOTE}
+         if [ $? == 0 ]; then
+            echo $green"Configuration copied to network."$nocolor;
+         else
+            echo $red"ERROR: Copying configuration to network."$nocolor
+            exit 1
+         fi
+         set -e
+      else
+         echo $red"WARNING: Network down, skipping copy to network."
+      fi
+   fi
+   echo "These files will be sources for symbolic links if the configuration is restored:"
+   for f in "$HOME/$USERDIR"/_*; do
+      if [[ -e "$f" ]]; then
+         src=`basename "$f"`
+         link="${src/#_/.}"
+         echo "~/$link will point to $green~/$USERDIR/$src$nocolor"
+      fi
+   done
+   echo $green"Done."$nocolor
+}
+
+#Restore config from network or file. File is in $1.
+#If $1 is empty get configuration archive from network
+#via scp.
+restore()
+{
+   #Get configuration file from network if $1 is was not passed
+   if [[ $# -lt 1 && "$COPY2NET" == "yes" ]]; then
+      echo "Restoring configuration from network..."
+      if ! netup; then
+         echo $red"ERROR: Network is down."
+         exit 1
+      fi
+      if ! type -t scp > /dev/null; then
+         echo $red"ERROR: scp not installed, can't restore from network."
+         exit 1
+      fi
+
+      echo $green"Reading $CFGARCHIVE from network..."
+      echo $green"* If you see an error like:"
+      echo $green"    \"stdin: not a tty\", just ignore it. It's not really a problem."
+      echo $green"* We move files to the network with scp, so you may be asked for"
+      echo $green"  a passphrase."
+      echo $nocolor
+      [[ -f "$HOME/$USERDIR/etc/$CFGARCHIVE" ]] &&  mv "$HOME/$USERDIR/etc/$CFGARCHIVE"{,.bak} 
+      set +e
+      scp $SCPFLAGS ${SCPREMOTE}"$CFGARCHIVE" "/tmp/$CFGARCHIVE" 
+      if [[ $? != 0 ]]; then
+         echo $red"ERROR: Reading configuration from network."
+         exit 1
+      fi
+      set -e
+      cfgfile="/tmp/$CFGARCHIVE" 
+   elif [[ $COPY2NET=no ]]; then
+      #File is local, from .homecfg or default
+      echo "Restoring configuration from local file..."
+      cfgfile="$HOME/$USERDIR/etc/$CFGARCHIVE"
+   else
+      #Filename passed by user -f flag
+      cfgfile="$1"
+   fi
+  
+   #Untar configuration file and restore symbolic links 
+   [[ -e "$cfgfile" ]] || { echo $red"ERROR: $cfgfile does not exist.$nocolor" && exit 1; }
+   echo $green"Restoring configuration from $cfgfile..."
+   tar -C "$HOME" -zxvf "$cfgfile" | sed -e "s/^/  <<< /g" 
+   echo $green"Recreating symbolic links."$nocolor
+   for f in "$HOME/$USERDIR"/_*; do
+      if [[ -e "$f" ]]; then
+         src=`basename "$f"`
+         link="${src/#_/.}"
+         #If there is a symbolic link already with that name
+         # then replace it.
+         pushd "$HOME" > /dev/null || { echo $red"ERROR: Chaning to home directory." && exit 1; }
+         if [[ -L "$link" ]]; then
+            echo "   Replacing existing link: ~/$link --> ${green}~/$USERDIR/$src"$nocolor
+            ln -sf "$USERDIR/$src" "$link" 
+         else
+            echo "   Creating new link: ~/$link --> ${green}~/$USERDIR/$src"$nocolor
+            ln -s "$USERDIR/$src" "$link" 
+         fi
+         popd > /dev/null
+      fi
+   done
+   echo $nocolor
+}
+
+#Print program name
+progname
+
+#Command-line paramenters
+COPY2NET="yes"
+action=""
+while getopts "mdnhrsf:" opt; do
+   case "$opt" in
+      h) help && exit 0
+         ;;
+      n) COPY2NET="no"
+         ;;
+      m) CFGARCHIVE="$USER-config-`date +%b%Y`.tgz"
+         ;;
+      d) CFGARCHIVE="$USER-config-`date +%Y%m%d`.tgz"
+         ;;
+      r) action="restore"
+         ;;
+      s) action="save"
+         ;;
+      f) action="restore";
+         CFGARCHIVE="$OPTARG"
+         ;;
+      [?]) help; echo $red"ERROR: unknown option."; exit 0
+         ;;
+   esac
+done
+[[ -z $action ]] && help && echo $red"ERROR: Either -r or -s must be passed"$nocolor
+$action
+echo $blue"Have a good day!!"$nocolor
+
