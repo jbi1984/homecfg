@@ -1,14 +1,29 @@
 #!/bin/sh
 set -e
 set -o nounset
-. `dirname $0`/libscript.sh
 
+#Colors
+bold="`tput bold`" 
+nobold="`tput sgr0`"
+ul="`tput smul`"
+noul="`tput rmul`"
+red="`tput setaf 1`"
+green="`tput setaf 2`"
+yellow="`tput setaf 3`"
+blue="`tput setaf 4`"
+magenta="`tput setaf 5`"
+cyan="`tput setaf 6`"
+white="`tput setaf 7`"
+nocolor="`tput setaf 9`"
+
+#Setup default values and load .homecfg
 CFG="$HOME/.homecfg"
-VER="0.2"
+VER="0.3"
 [[ -f "$CFG" ]] && source "$CFG" 
 
 
 USERDIR=${userdir:-.`whoami`}
+[[ ! -e "$USERDIR/etc" ]] && pushd "$HOME" > /dev/null && mkdir -p $USERDIR/etc && popd > /dev/null
 SCPFLAGS=${scpoptions:-""}
 SCPREMOTE=${scpremote:-""}
 USER=`whoami`
@@ -29,24 +44,99 @@ progname()
 #Display program options and help
 help()
 {
-   echo "Usage: homecfg -r|-s [-nhmd] [-f ${ul}file${noul}]"
-   echo "   $green-s$nocolor Store configuration on the network (and in ~/$USERDIR/etc/$CFGARCHIVE also)."
-   echo "   $green-r$nocolor Restore configuration from the network."
-   echo "   $green-n$nocolor Do not copy configuration to/from the network, leave it only in local file."
-   echo "   $green-f ${ul}file${noul}${nocolor} Restore config from specified file."
-   echo "   $green-m$nocolor Add month/year suffix to configuration archive."
-   echo "      Useful to make monthly snapshot."
-   echo "   $green-d$nocolor Add year/month/day suffix to configuration archive."
-   echo "      Useful to make day snapshot."
-   echo "   $green-h$nocolor this help."
+   echo "Usage: homecfg -r|-s| [-nhmd] [-f ${ul}file${noul}]"
+   echo "       homecfg -a ${ul}file${noul}"
+   echo "       homecfg -l ${ul}file${noul}"
    echo
-   echo "Example:"
-   echo "   Store configuration archive in ~/$USERDIR/etc, but also on the network:"
-   echo "   $ homecfg -s"
-   echo "   Store configuration archive in ~/$USERDIR/etc (not on network):"
-   echo "   $ homecfg -n"
-   echo "   Restore configuration from network storage and make appropriate symbolic links:"
-   echo "   $ homecfg -r"
+   echo -e "   $green-s\t\t$nocolor Store configuration on the network"
+   echo -e "   \t\t (and in ~/$USERDIR/etc/$CFGARCHIVE also)."
+   echo -e "   $green-r\t\t$nocolor Restore configuration from the network."
+   echo -e "   $green-n\t\t$nocolor Do not copy configuration to/from the network, leave it only in local file."
+   echo -e "   $green-f ${ul}file\t${noul}${nocolor} Restore config from specified file."
+   echo -e "   $green-m\t\t$nocolor Add month/year suffix to configuration archive."
+   echo -e "   \t\t Useful to make monthly snapshot."
+   echo -e "   $green-d\t\t$nocolor Add year/month/day suffix to configuration archive."
+   echo -e "   \t\t Useful to make day snapshot."
+   echo -e "   $green-a ${ul}file\t${noul}${nocolor} Add file to the list of managed configuration files."
+   echo -e "   \t\t file must start with a . and be located in the user's HOME directory."
+   echo -e "   $green-l\t\t$nocolor List dot files managed in the HOME directory."
+   echo -e "   $green-h\t\t$nocolor this help."
+   echo
+   echo -e "Examples:"
+   echo -e "   Add .bashrc to list of managed configuration files:"
+   echo -e "   $ homecfg -a ~/.bashrc"
+   echo -e "   Store configuration archive in ~/$USERDIR/etc, but also on the network:"
+   echo -e "   $ homecfg -s"
+   echo -e "   Store configuration archive in ~/$USERDIR/etc (not on network):"
+   echo -e "   $ homecfg -n"
+   echo -e "   Restore configuration from network storage and make appropriate symbolic links:"
+   echo -e "   $ homecfg -r"
+}
+
+#Get the source link for a specified managed configuration file (or directory)
+#e.g. return .mike/_bashrc for .bashrc
+getsrcformanaged()
+{
+   #Make sure file exists
+   file=`basename "$1"`
+   [[ -e "$HOME/$file" ]]  || { echo $red"ERROR: Managed configuration file $HOME/$1 does not exist."$nocolor && exit 1; }
+
+   #Make sure file starts with a period
+   [[ "$file" != .* ]] && echo $red"ERROR: Managed configuration files must start with a period."$nocolor && exit 1;
+
+   #Return source link source with directory relative to HOME
+   linkfile="${file/#./_}"
+   result="$USERDIR/$linkfile"
+}
+
+getmanagedforsrc()
+{
+   managed=`basename "$1"`
+   managed="${managed/#_/.}"
+   result="$managed"
+}
+
+listmanaged()
+{
+   i=0
+   for f in "$HOME/$USERDIR"/_*; do
+      if [[ -e "$f" ]]; then
+         getmanagedforsrc "$f"
+         managed="$result"
+         getsrcformanaged "$managed"
+         src="$result"
+         echo -e "$green~/$src\t-->\t$blue~/$managed$nocolor"
+         let ++i
+      fi
+   done
+   set +o nounset
+   if [[ $1 != -q ]]; then
+      echo "$i managed links."
+      echo "Nothing has been changed."
+   fi
+   set -o nounset
+}
+
+addmanaged()
+{
+   #Get link target name (e.g. .ologgio/_homecfg)
+   file=`basename "$1"`
+   getsrcformanaged "$file"
+   src="$result"
+   echo "Adding $file to managed links."
+
+   #Exit if file is already managed 
+   #(i.e. if it is a symbloc link that points to $USERDIR/_file)
+   pushd "$HOME" > /dev/null
+   [[ -L "$file" && "`readlink "$file"`" == $src ]] && { echo $red"ERROR: $file is already managed." && exit 1; }
+
+   #Otherwise, copy the file to the _file and create the symbolic link
+   echo -n "Copying..."
+   cp -v $file $src 
+   rm  $file
+   echo -n "Linking..."
+   ln -vs $src $file
+   popd > /dev/null
 }
 
 #Tar, compress and save my personal config
@@ -65,11 +155,12 @@ save()
    #Tar the configuration and copy it to the network with scp 
    #unless the user passed the -n option
    pushd "$HOME" > /dev/null
-   tar --exclude-backups --exclude-vcs --exclude="*~" --exclude="*${CFGARCHIVE::-4}*" "$xopt" -zcvf "/tmp/$CFGARCHIVE" "$USERDIR" | sed -e "s/^/  >>> /g" 
+   tar --exclude-backups --exclude-vcs --exclude="*~" --exclude="*${CFGARCHIVE::-4}*" $xopt -zcvf "/tmp/$CFGARCHIVE" "$USERDIR" | sed -e "s/^/  >>> /g" 
    echo $nocolor
-   mv -v --backup=simple --suffix=.bak "/tmp/$CFGARCHIVE" "$HOME/$USERDIR/etc/"
+   mv --backup=simple --suffix=.bak "/tmp/$CFGARCHIVE" "$HOME/$USERDIR/etc/"
    popd > /dev/null
 
+   extramsg=""
    if type -t scp > /dev/null && [[ "$COPY2NET" == "yes" ]]; then
       if [ netup ]; then
          echo $green"Copying $CFGARCHIVE to network..."
@@ -82,6 +173,7 @@ save()
          scp $SCPFLAGS "$HOME/$USERDIR/etc/$CFGARCHIVE" ${SCPREMOTE}
          if [ $? == 0 ]; then
             echo $green"Configuration copied to network."$nocolor;
+            extramsg="and in '$SCPREMOTE'"
          else
             echo $red"ERROR: Copying configuration to network."$nocolor
             exit 1
@@ -91,15 +183,9 @@ save()
          echo $red"WARNING: Network down, skipping copy to network."
       fi
    fi
-   echo "These files will be sources for symbolic links if the configuration is restored:"
-   for f in "$HOME/$USERDIR"/_*; do
-      if [[ -e "$f" ]]; then
-         src=`basename "$f"`
-         link="${src/#_/.}"
-         echo "~/$link will point to $green~/$USERDIR/$src$nocolor"
-      fi
-   done
-   echo $green"Done."$nocolor
+   echo "These files will be symbolic links if the configuration is restored:"
+   listmanaged -q
+   echo "Configuration archive in ~/$USERDIR/etc/$CFGARCHIVE $extramsg."
 }
 
 #Restore config from network or file. File is in $1.
@@ -173,8 +259,9 @@ progname
 
 #Command-line paramenters
 COPY2NET="yes"
+ARGS=""
 action=""
-while getopts "mdnhrsf:" opt; do
+while getopts "lmdnhrsf:a:" opt; do
    case "$opt" in
       h) help && exit 0
          ;;
@@ -183,6 +270,11 @@ while getopts "mdnhrsf:" opt; do
       m) CFGARCHIVE="$USER-config-`date +%b%Y`.tgz"
          ;;
       d) CFGARCHIVE="$USER-config-`date +%Y%m%d`.tgz"
+         ;;
+      l) action="listmanaged"
+         ;;
+      a) action="addmanaged"
+         ARGS="$OPTARG"
          ;;
       r) action="restore"
          ;;
@@ -195,7 +287,8 @@ while getopts "mdnhrsf:" opt; do
          ;;
    esac
 done
-[[ -z $action ]] && help && echo $red"ERROR: Either -r or -s must be passed"$nocolor
-$action
+[[ -z $action ]] && help && echo $red"ERROR: Either -r,-s,-a or -l must be passed"$nocolor
+$action $ARGS
+echo $green"Done."
 echo $blue"Have a good day!!"$nocolor
 
