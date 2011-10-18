@@ -1,0 +1,22 @@
+# Maintainer: Joe User <joe.user@example.com>
+
+pkgname=homecfg
+pkgver=0.3
+pkgrel=1
+pkgdesc="Manage roaming configuration files, backup/restore, etc."
+arch=('i686' 'x86_64')
+url="http://code.google.com/p/homecfg/"
+license=('GPL' 'Artistic2.0')
+groups=()
+depends=('tar' 'openssh')
+source=(file:///home/ologgio/prj/homecfg/dist/$pkgname-$pkgver.tar.gz)
+
+build() {
+   cd "$srcdir"/$pkgname-$pkgver
+}
+
+package() {
+   cd "$srcdir"/$pkgname-$pkgver
+   cp homecfg ~/bin
+}
+md5sums=('2c6504eb3216af6789a4be71bb793e36')
