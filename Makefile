@@ -1,22 +1,28 @@
 PRJ=homecfg
 VER=0.3
+REL=1
+PKG=${PRJ}-${VER}
+
 FILES=homecfg \
 		dist
 
-all: source packages
+.PHONY : dist
+
+all: source dist
 	
 source: 
-	rm -r /tmp/${PRJ}-${VER}
-	mkdir /tmp/${PRJ}-${VER}
-	cp -a ${FILES} /tmp/${PRJ}-${VER}
-	tar -C /tmp --exclude=*~ --exclude=.*.swp --exclude=homecfg-*.tar.gz -zcvf dist/homecfg-${VER}.tar.gz ${PRJ}-${VER}
+	if [[ -d /tmp/$(PKG) ]]; then rm -r /tmp/$(PKG); fi
+	mkdir /tmp/$(PKG)
+	cp -a $(FILES) /tmp/$(PKG)
+	tar -C /tmp --exclude=*~ --exclude=.*.swp --exclude=homecfg-*.tar.gz -zcvf dist/homecfg-$(VER).tar.gz $(PKG)
 	
-packages: arch
+dist: archlinux
 
-arch:
-	cd /tmp/${PRJ}-${VER}/dist/arch; \
-	md5=`makepkg -g`&& \
-	sed -i -e 's/^.*md5sums.*$$/${md5}/g' PKGBUILD ; \
+archlinux: dist/arch/$(PKG)-$(REL)-any.pkg.tar.xz
+
+dist/arch/$(PKG)-$(REL)-any.pkg.tar.xz:
+	cd /tmp/$(PKG)/dist/arch; \
+	md5=`makepkg -g` && sed -i -e "s/^.*md5sums.*$$//g" PKGBUILD && echo "$$md5" >> PKGBUILD ; \
 	makepkg -f  
-	cp /tmp/"${PRJ}-${VER}"/dist/arch/"${PRJ}-${VER}"*.tar.xz dist/arch
+	cp /tmp/$(PKG)/dist/arch/$(PKG)*.tar.xz dist/arch
 	
