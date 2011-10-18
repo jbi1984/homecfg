@@ -26,3 +26,7 @@ dist/arch/$(PKG)-$(REL)-any.pkg.tar.xz:
 	makepkg -f  
 	cp /tmp/$(PKG)/dist/arch/$(PKG)*.tar.xz dist/arch
 	
+clean:
+	find . -name "*~" -delete
+	rm dist/arch/$(PKG)-$(REL)-any.pkg.tar.xz
+	rm dist/homecfg-$(VER).tar.gz 
