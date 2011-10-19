@@ -1,7 +1,7 @@
 # Maintainer: Joe User <joe.user@example.com>
 
 pkgname=homecfg
-pkgver=0.3
+pkgver=0.31
 pkgrel=1
 pkgdesc="Manage roaming configuration files, backup/restore, etc."
 arch=('any')
