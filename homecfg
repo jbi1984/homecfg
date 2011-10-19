@@ -18,7 +18,7 @@ nocolor="`tput setaf 9`"
 
 #Setup default values and load .homecfg
 CFG="$HOME/.homecfg"
-VER="0.3"
+VER="0.31"
 [[ -f "$CFG" ]] && source "$CFG" 
 
 
